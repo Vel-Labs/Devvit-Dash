@@ -10,6 +10,7 @@ import type {
   CompleteRunResponse,
   CreatorOutcomeResponse,
   CreatorOutcomeTile,
+  DeleteMyDataResponse,
   LeaderboardResponse,
   RemoveTileRequest,
   RemoveTileResponse,
@@ -25,13 +26,14 @@ import type {
   ValidateTileResponse,
 } from '../../shared/api';
 import type { ApiError } from '../../shared/api';
+import { collectCreatorOutcomeTiles } from '../../shared/creatorOutcome';
 import type { CourseTile, LeaderboardEntry, TileReportReason } from '../../shared/game/types';
-import { laneAtColumn } from '../../shared/game/replay';
 import { validateCourseTile } from '../../shared/game/validator';
 import { getCurrentPlayer, getTenantIdentity, isCurrentPlayerModerator } from '../core/identity';
 import { tenantStore } from '../repositories/tenantStore';
 import {
   getOrCreateProfile,
+  reconcileFeaturedTileProgress,
   recordCertifiedTile,
   recordCompletedRun,
 } from '../services/profileService';
@@ -41,6 +43,7 @@ import {
   repairRoutesAfterTileRemoval,
 } from '../services/routeService';
 import { createRun, finishRun } from '../services/runService';
+import { deleteUserData } from '../services/dataLifecycleService';
 import { disabledWorldCatalog } from '../services/worldCatalog';
 
 export const api = new Hono();
@@ -68,6 +71,20 @@ api.get('/bootstrap', async (c) => {
     const profile = player.authenticated
       ? await getOrCreateProfile(player.userId, player.username, tenant.id)
       : null;
+    if (profile) reconcileFeaturedTileProgress(profile, await tenantStore.listRoutes());
+    const todaySubmissionId = player.authenticated
+      ? await tenantStore.getSubmissionForDate(dateKeyUtc(), player.userId)
+      : undefined;
+    const storedTodaySubmission = todaySubmissionId
+      ? await tenantStore.getTile(todaySubmissionId)
+      : undefined;
+    const todaySubmission =
+      storedTodaySubmission &&
+      storedTodaySubmission.tenantId === tenant.id &&
+      storedTodaySubmission.authorId === player.userId &&
+      storedTodaySubmission.status !== 'removed'
+        ? storedTodaySubmission
+        : null;
     if (profile) await tenantStore.saveProfile(profile);
     const response: BootstrapResponse = {
       status: 'ok',
@@ -75,6 +92,7 @@ api.get('/bootstrap', async (c) => {
       username: player.username,
       authenticated: player.authenticated,
       dailyRoute,
+      todaySubmission,
       profile,
       achievements: ACHIEVEMENTS,
       worldTourEnabled: disabledWorldCatalog.enabled,
@@ -104,6 +122,21 @@ api.post('/tiles', async (c) => {
     const body = await c.req.json<SubmitTileRequest>();
     const dateKey = dateKeyUtc();
     const existingId = await tenantStore.getSubmissionForDate(dateKey, player.userId);
+    const existingTile = existingId ? await tenantStore.getTile(existingId) : undefined;
+    if (
+      existingId &&
+      (!existingTile ||
+        existingTile.tenantId !== tenant.id ||
+        existingTile.authorId !== player.userId)
+    ) {
+      return c.json(
+        error(
+          'submission-record-invalid',
+          'Today’s saved tile could not be verified. Reload before publishing.'
+        ),
+        409
+      );
+    }
     const now = new Date().toISOString();
     const tile: CourseTile = {
       version: GAME_VERSION,
@@ -111,7 +144,7 @@ api.post('/tiles', async (c) => {
       tenantId: tenant.id,
       authorId: player.userId,
       authorName: player.username,
-      createdAt: body.tile.createdAt || now,
+      createdAt: existingTile?.createdAt ?? (body.tile.createdAt || now),
       updatedAt: now,
       width: TILE_WIDTH,
       lanes: cloneLanes(body.tile.lanes),
@@ -133,7 +166,12 @@ api.post('/tiles', async (c) => {
     await tenantStore.saveTile(certified);
     await tenantStore.saveSubmissionForDate(dateKey, player.userId, certified.id);
     if (!existingId) await recordCertifiedTile(player.userId, player.username, tenant.id);
-    const response: SubmitTileResponse = { status: 'ok', tile: certified, validation };
+    const response: SubmitTileResponse = {
+      status: 'ok',
+      disposition: existingId ? 'updated' : 'created',
+      tile: certified,
+      validation,
+    };
     return c.json(response);
   } catch (caught) {
     const message = caught instanceof Error ? caught.message : 'Tile submission failed.';
@@ -305,24 +343,9 @@ api.post('/runs/complete', async (c) => {
   try {
     const tenant = getTenantIdentity();
     const body = await c.req.json<CompleteRunRequest>();
-    const route = await tenantStore.getRoute(body.routeId);
-    if (!route)
-      return c.json(
-        error('route-not-found', 'The route was removed before this run completed.'),
-        404
-      );
-    if (typeof body.routeRevision === 'number' && route.recipe.revision !== body.routeRevision) {
-      return c.json(
-        error('stale-route-revision', 'The route changed before this run completed.'),
-        409
-      );
-    }
-    const result = await finishRun(body, route);
-    await tenantStore.saveBestRun(
-      result.routeId,
-      result.routeRevision ?? route.recipe.revision,
-      result
-    );
+    const { result, route } = await finishRun(body);
+    await tenantStore.touchUserActivity(result.userId);
+    await tenantStore.saveBestRun(result.routeId, result.routeRevision, result);
     const profile = await recordCompletedRun(result, route, tenant.id);
     const response: CompleteRunResponse = { status: 'ok', result, profile };
     return c.json(response);
@@ -356,45 +379,27 @@ api.get('/creator/outcome', async (c) => {
     if (!player.authenticated)
       return c.json(error('authentication-required', 'Sign in to view creator outcomes.'), 401);
     const profile = await getOrCreateProfile(player.userId, player.username, tenant.id);
-    const tiles: CreatorOutcomeTile[] = [];
+    const dailyRoute = await ensureDailyRoute(tenant);
     const routes = await tenantStore.listRoutes();
-
-    for (const route of routes) {
-      const runs = (await tenantStore.listBestRuns(route.recipe.id, route.recipe.revision)).filter(
-        (run) => run.completed && run.userId !== player.userId
-      );
-      route.tiles.forEach((tile, tileIndex) => {
-        if (tile.authorId !== player.userId) return;
-        const startColumn = tileIndex * tile.width;
-        const sampleColumn = startColumn + Math.floor(tile.width / 2);
-        const pathChoices = { top: 0, middle: 0, bottom: 0 };
-        for (const run of runs) {
-          const lane = laneAtColumn(run.laneEvents ?? [], sampleColumn);
-          if (lane === 0) pathChoices.top += 1;
-          else if (lane === 1) pathChoices.middle += 1;
-          else pathChoices.bottom += 1;
-        }
-        tiles.push({
-          tileId: tile.id,
-          routeId: route.recipe.id,
-          dateKey: route.recipe.dateKey,
-          routeRevision: route.recipe.revision,
-          tileIndex,
-          crossings: runs.length,
-          cleanCrossings: runs.filter((run) => run.damageTaken === 0).length,
-          pathChoices,
-        });
-      });
-    }
-
-    tiles.sort(
-      (left, right) => right.crossings - left.crossings || right.dateKey.localeCompare(left.dateKey)
+    reconcileFeaturedTileProgress(profile, routes);
+    await tenantStore.saveProfile(profile);
+    const routeSamples = await Promise.all(
+      routes.map(async (route) => ({
+        route,
+        bestRuns: await tenantStore.listBestRuns(route.recipe.id, route.recipe.revision),
+      }))
     );
+    const tiles: CreatorOutcomeTile[] = collectCreatorOutcomeTiles(player.userId, routeSamples);
     const response: CreatorOutcomeResponse = {
       status: 'ok',
       profile,
-      featuredTiles: profile.stats.tilesFeatured,
-      totalCrossings: profile.stats.totalTileCrossings,
+      creatorName: player.username,
+      communityName: tenant.name,
+      ...(player.profileUrl ? { profileUrl: player.profileUrl } : {}),
+      dailyRoute,
+      featuredRouteAppearances: profile.stats.tilesFeatured,
+      lifetimeRecordedCrossings: profile.stats.totalTileCrossings,
+      sampleScope: 'current-route-revision-best-runs-by-other-players',
       tiles,
     };
     return c.json(response);
@@ -410,6 +415,32 @@ api.get('/profile', async (c) => {
   if (!player.authenticated)
     return c.json(error('authentication-required', 'Sign in to load a profile.'), 401);
   const profile = await getOrCreateProfile(player.userId, player.username, tenant.id);
+  reconcileFeaturedTileProgress(profile, await tenantStore.listRoutes());
   await tenantStore.saveProfile(profile);
   return c.json({ status: 'ok', profile });
+});
+
+api.delete('/profile', async (c) => {
+  try {
+    const tenant = getTenantIdentity();
+    const player = await getCurrentPlayer();
+    if (!player.authenticated)
+      return c.json(error('authentication-required', 'Sign in to delete your data.'), 401);
+    const deleted = await deleteUserData(tenant, player.userId);
+    const response: DeleteMyDataResponse = {
+      status: 'ok',
+      tilesDeleted: deleted.tilesDeleted,
+      routeRevisionsDeleted: deleted.routeRevisionsDeleted,
+      routesRepaired: deleted.routesRepaired,
+      reportsAnonymized: deleted.reportsAnonymized,
+      bestRunsDeleted: deleted.bestRunsDeleted,
+      runTokensDeleted: deleted.runTokensDeleted,
+      submissionsDeleted: deleted.submissionsDeleted,
+      profileDeleted: deleted.profileDeleted,
+    };
+    return c.json(response);
+  } catch (caught) {
+    const message = caught instanceof Error ? caught.message : 'Data deletion failed.';
+    return c.json(error('data-delete-failed', message), 500);
+  }
 });

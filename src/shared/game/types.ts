@@ -94,7 +94,7 @@ export type RunStart = {
 export type RunSubmission = {
   token: string;
   routeId: string;
-  routeRevision?: number;
+  routeRevision: number;
   laneEvents?: LaneInputEvent[];
   elapsedMs: number;
   damageTaken: number;
@@ -107,6 +107,7 @@ export type RunResult = RunSubmission & {
   userId: string;
   username: string;
   score: number;
+  distanceColumns: number;
   completedAt: string;
 };
 
@@ -145,6 +146,8 @@ export type PlayerStats = {
   tilesFeatured: number;
   runsCompleted: number;
   cleanRuns: number;
+  failedDeliveries: number;
+  distanceColumnsTraveled: number;
   uniqueRoutesCompleted: number;
   currentStreak: number;
   bestStreak: number;

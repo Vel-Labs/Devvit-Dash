@@ -1,14 +1,25 @@
 import * as Phaser from 'phaser';
 import { apiClient } from '../api/client';
 import { kenneyTextureKey } from '../art/kenney';
+import type { BuilderEntryData } from '../builderReentry';
+import { verticalGestureDirection } from '../runnerGesture';
 import { session } from '../state/session';
 import { COLORS, FONT_FAMILY } from '../theme';
 import { createButton } from '../ui/button';
+import {
+  applyViewportLayout,
+  getRunnerViewportGeometry,
+  LANDSCAPE_LAYOUT,
+  type RunnerViewportGeometry,
+  type ViewportLayout,
+} from '../layout';
 import { FOUNDING_TILES } from '../../shared/game/foundingTiles';
 import { generateRoute, countRouteParcels } from '../../shared/game/generator';
 import { scoreRun } from '../../shared/game/scoring';
 import { dateKeyUtc } from '../../shared/game/seed';
 import { flattenRouteColumns } from '../../shared/game/tile';
+import { appendReplaySafeLaneEvent } from '../../shared/game/replay';
+import { clampDistanceColumns } from '../../shared/game/runOutcome';
 import type {
   CourseTile,
   Feature,
@@ -26,6 +37,7 @@ type RunnerSceneData = {
   route?: RouteBundle;
   previewTile?: CourseTile;
   mode?: RunnerMode;
+  builderReturn?: BuilderEntryData;
 };
 
 type ActiveRun = {
@@ -34,17 +46,10 @@ type ActiveRun = {
   startedAtMs: number;
 };
 
-const LANE_Y = [224, 356, 488] as const;
-const PLAYER_X = 250;
-const COLUMN_WIDTH = 96;
 const BASE_COLUMNS_PER_SECOND = 2.75;
 const BOOST_COLUMNS_PER_SECOND = 4.1;
 const LANE_TWEEN_MS = 210;
 const FOUNDING_AUTHOR = 'daily-dash-founders';
-const PLAYFIELD_LEFT = 20;
-const PLAYFIELD_RIGHT = 1060;
-const PLAYFIELD_TOP = 118;
-const PLAYFIELD_BOTTOM = 610;
 const SWIPE_THRESHOLD_PX = 34;
 
 const makePreviewRoute = (tile: CourseTile): RouteBundle => {
@@ -82,24 +87,30 @@ export class RunnerScene extends Phaser.Scene {
   private boostUntilMs = 0;
   private invulnerableUntilMs = 0;
   private complete = false;
-  private player?: Phaser.GameObjects.Container;
-  private courseGraphics?: Phaser.GameObjects.Graphics;
-  private sceneryGraphics?: Phaser.GameObjects.Graphics;
-  private touchGuideGraphics?: Phaser.GameObjects.Graphics;
-  private pipGraphics?: Phaser.GameObjects.Graphics;
-  private statsText?: Phaser.GameObjects.Text;
-  private controlsText?: Phaser.GameObjects.Text;
+  private player: Phaser.GameObjects.Container | undefined;
+  private courseGraphics: Phaser.GameObjects.Graphics | undefined;
+  private sceneryGraphics: Phaser.GameObjects.Graphics | undefined;
+  private touchGuideGraphics: Phaser.GameObjects.Graphics | undefined;
+  private pipGraphics: Phaser.GameObjects.Graphics | undefined;
+  private statsText: Phaser.GameObjects.Text | undefined;
+  private controlsText: Phaser.GameObjects.Text | undefined;
   private keyboard: Phaser.Types.Input.Keyboard.CursorKeys | undefined;
   private pointerStartY: number | undefined;
-  private wheelA?: Phaser.GameObjects.Arc;
-  private wheelB?: Phaser.GameObjects.Arc;
-  private parcelVisual?: Phaser.GameObjects.Rectangle;
+  private pointerStartedInPlayfield = false;
+  private pointerMovedLane = false;
+  private builderReturn: BuilderEntryData | undefined;
+  private wheelA: Phaser.GameObjects.Arc | undefined;
+  private wheelB: Phaser.GameObjects.Arc | undefined;
+  private parcelVisual: Phaser.GameObjects.Rectangle | undefined;
   private tileLabels = new Map<number, Phaser.GameObjects.Text>();
   private routeSprites = new Map<string, Phaser.GameObjects.Image>();
-  private finishLabel?: Phaser.GameObjects.Text;
-  private feedbackText?: Phaser.GameObjects.Text;
-  private feedbackTween?: Phaser.Tweens.Tween;
+  private finishLabel: Phaser.GameObjects.Text | undefined;
+  private feedbackText: Phaser.GameObjects.Text | undefined;
+  private feedbackTween: Phaser.Tweens.Tween | undefined;
   private laneEvents: LaneInputEvent[] = [];
+  private rankedStartFailure: string | undefined;
+  private layout: ViewportLayout = LANDSCAPE_LAYOUT;
+  private geometry: RunnerViewportGeometry = getRunnerViewportGeometry('landscape');
 
   constructor() {
     super('Runner');
@@ -107,6 +118,7 @@ export class RunnerScene extends Phaser.Scene {
 
   init(data: RunnerSceneData): void {
     this.mode = data.mode ?? 'daily';
+    this.builderReturn = data.builderReturn;
     if (data.previewTile) {
       this.route = makePreviewRoute(data.previewTile);
     } else if (data.route) {
@@ -128,6 +140,7 @@ export class RunnerScene extends Phaser.Scene {
     this.invulnerableUntilMs = 0;
     this.complete = false;
     this.laneEvents = [];
+    this.rankedStartFailure = undefined;
     this.activeRun = {
       token: 'local-run',
       routeRevision: this.route.recipe.revision,
@@ -136,6 +149,9 @@ export class RunnerScene extends Phaser.Scene {
   }
 
   create(): void {
+    this.resetSceneObjects();
+    this.layout = applyViewportLayout(this.scale);
+    this.geometry = getRunnerViewportGeometry(this.layout.mode);
     this.cameras.main.setBackgroundColor(COLORS.sky);
     this.drawStaticFrame();
     this.sceneryGraphics = this.add.graphics().setDepth(0);
@@ -144,7 +160,7 @@ export class RunnerScene extends Phaser.Scene {
     this.pipGraphics = this.add.graphics().setDepth(10);
     this.tileLabels.clear();
     this.player = this.createCourier().setDepth(5);
-    this.player.setPosition(PLAYER_X, LANE_Y[this.lane]);
+    this.player.setPosition(this.geometry.playerX, this.geometry.laneYs[this.lane]);
 
     this.keyboard = this.input.keyboard?.createCursorKeys();
     this.input.keyboard?.on('keydown-W', () => this.requestLane(-1));
@@ -152,88 +168,38 @@ export class RunnerScene extends Phaser.Scene {
     this.createTouchControls();
     this.input.on('pointerdown', (pointer: Phaser.Input.Pointer) => {
       this.pointerStartY = pointer.y;
+      this.pointerStartedInPlayfield = this.isPlayfieldPointer(pointer);
+      this.pointerMovedLane = false;
+    });
+    this.input.on('pointermove', (pointer: Phaser.Input.Pointer) => {
+      if (!pointer.isDown || this.pointerStartY === undefined || !this.pointerStartedInPlayfield) {
+        return;
+      }
+      const direction = verticalGestureDirection(this.pointerStartY, pointer.y, SWIPE_THRESHOLD_PX);
+      if (direction === 0) return;
+      this.requestLane(direction);
+      this.pointerMovedLane = true;
+      this.pointerStartY = pointer.y;
     });
     this.input.on('pointerup', (pointer: Phaser.Input.Pointer) => {
       if (this.pointerStartY === undefined) return;
-      const deltaY = pointer.y - this.pointerStartY;
+      const startY = this.pointerStartY;
+      const startedInPlayfield = this.pointerStartedInPlayfield;
+      const movedLane = this.pointerMovedLane;
       this.pointerStartY = undefined;
-      if (!this.isPlayfieldPointer(pointer)) return;
-      if (Math.abs(deltaY) >= SWIPE_THRESHOLD_PX) {
-        this.requestLane(deltaY < 0 ? -1 : 1);
+      this.pointerStartedInPlayfield = false;
+      this.pointerMovedLane = false;
+      if (!startedInPlayfield || movedLane) return;
+      const direction = verticalGestureDirection(startY, pointer.y, SWIPE_THRESHOLD_PX);
+      if (direction !== 0) {
+        this.requestLane(direction);
         return;
       }
       this.requestLaneToward(this.laneFromPointerY(pointer.y));
     });
 
-    this.add
-      .text(46, 28, this.routeTitle(), {
-        fontFamily: FONT_FAMILY,
-        fontSize: '28px',
-        fontStyle: 'bold',
-        color: '#243642',
-      })
-      .setDepth(9);
-    this.add
-      .text(420, 70, this.routeMetaLabel(), {
-        fontFamily: FONT_FAMILY,
-        fontSize: '15px',
-        fontStyle: 'bold',
-        color: '#49626d',
-      })
-      .setDepth(9);
-    this.add
-      .text(46, 66, 'PACKAGE INTEGRITY', {
-        fontFamily: FONT_FAMILY,
-        fontSize: '18px',
-        fontStyle: 'bold',
-        color: '#243642',
-      })
-      .setDepth(9);
-    this.statsText = this.add
-      .text(1018, 28, '', {
-        fontFamily: FONT_FAMILY,
-        fontSize: '20px',
-        color: '#243642',
-        align: 'right',
-      })
-      .setOrigin(1, 0)
-      .setDepth(9);
-    this.add
-      .text(640, 104, 'Swipe up/down anywhere on the road, or tap a lane to move toward it.', {
-        fontFamily: FONT_FAMILY,
-        fontSize: '17px',
-        fontStyle: 'bold',
-        color: '#243642',
-        align: 'center',
-      })
-      .setOrigin(0.5, 0)
-      .setDepth(9);
-    this.controlsText = this.add
-      .text(965, 70, '', {
-        fontFamily: FONT_FAMILY,
-        fontSize: '16px',
-        fontStyle: 'bold',
-        color: '#49626d',
-        align: 'right',
-      })
-      .setOrigin(1, 0)
-      .setDepth(9);
-    this.add
-      .text(580, 618, 'CRATE -1  ·  GAP -1  ·  PARCEL +350  ·  BOOST +75', {
-        fontFamily: FONT_FAMILY,
-        fontSize: '18px',
-        fontStyle: 'bold',
-        color: '#243642',
-        backgroundColor: '#fff7dfcc',
-        padding: { x: 14, y: 7 },
-      })
-      .setOrigin(0.5, 0)
-      .setDepth(9);
-
-    createButton(this, 1120, 661, 250, 58, 'EXIT RUN', () => this.scene.start('Menu'), {
-      fill: COLORS.muted,
-      fontSize: 18,
-    });
+    this.createHud();
+    this.feedbackText = this.createFeedbackText();
 
     this.updateHud();
     this.renderCourse();
@@ -273,16 +239,128 @@ export class RunnerScene extends Phaser.Scene {
     }
   }
 
+  private createHud(): void {
+    const portrait = this.layout.mode === 'portrait';
+    this.add
+      .text(portrait ? 28 : 46, portrait ? 24 : 28, this.routeTitle(), {
+        fontFamily: FONT_FAMILY,
+        fontSize: portrait ? '22px' : '28px',
+        fontStyle: 'bold',
+        color: '#243642',
+      })
+      .setDepth(9);
+    if (portrait) {
+      this.add
+        .text(28, 54, this.routeTenantLabel(), {
+          fontFamily: FONT_FAMILY,
+          fontSize: '20px',
+          fontStyle: 'bold',
+          color: '#243642',
+        })
+        .setDepth(9);
+    }
+    this.add
+      .text(portrait ? 28 : 420, portrait ? 138 : 70, this.routeMetaLabel(), {
+        fontFamily: FONT_FAMILY,
+        fontSize: portrait ? '13px' : '15px',
+        fontStyle: 'bold',
+        color: '#49626d',
+        ...(portrait ? { wordWrap: { width: 660 } } : {}),
+      })
+      .setDepth(9);
+    this.add
+      .text(portrait ? 28 : 46, portrait ? 94 : 66, 'PACKAGE INTEGRITY', {
+        fontFamily: FONT_FAMILY,
+        fontSize: portrait ? '14px' : '18px',
+        fontStyle: 'bold',
+        color: '#243642',
+      })
+      .setDepth(9);
+    this.statsText = this.add
+      .text(portrait ? 692 : 1018, portrait ? 28 : 28, '', {
+        fontFamily: FONT_FAMILY,
+        fontSize: portrait ? '17px' : '20px',
+        color: '#243642',
+        align: 'right',
+      })
+      .setOrigin(1, 0)
+      .setDepth(9);
+    this.add
+      .text(
+        portrait ? 360 : 640,
+        portrait ? 202 : 104,
+        'Swipe up/down on the road, or tap a lane to move toward it.',
+        {
+          fontFamily: FONT_FAMILY,
+          fontSize: portrait ? '18px' : '17px',
+          fontStyle: 'bold',
+          color: '#243642',
+          align: 'center',
+          ...(portrait ? { wordWrap: { width: 650 } } : {}),
+        }
+      )
+      .setOrigin(0.5, 0)
+      .setDepth(9);
+    this.controlsText = this.add
+      .text(portrait ? 690 : 965, portrait ? 98 : 70, '', {
+        fontFamily: FONT_FAMILY,
+        fontSize: portrait ? '15px' : '16px',
+        fontStyle: 'bold',
+        color: '#49626d',
+        align: 'right',
+      })
+      .setOrigin(1, 0)
+      .setDepth(9);
+    this.add
+      .text(portrait ? 184 : 425, portrait ? 1004 : 608, 'AVOID\nCRATE · GAP  -1', {
+        fontFamily: FONT_FAMILY,
+        fontSize: portrait ? '17px' : '17px',
+        fontStyle: 'bold',
+        color: '#8f332d',
+        align: 'center',
+        backgroundColor: '#fde0dacc',
+        padding: { x: portrait ? 18 : 16, y: 8 },
+      })
+      .setOrigin(0.5, 0)
+      .setDepth(9);
+    this.add
+      .text(portrait ? 526 : 775, portrait ? 1004 : 608, 'COLLECT\nPARCEL +350 · BOOST +75', {
+        fontFamily: FONT_FAMILY,
+        fontSize: portrait ? '17px' : '17px',
+        fontStyle: 'bold',
+        color: '#5f4814',
+        align: 'center',
+        backgroundColor: '#fff0bacc',
+        padding: { x: portrait ? 18 : 16, y: 8 },
+      })
+      .setOrigin(0.5, 0)
+      .setDepth(9);
+
+    createButton(
+      this,
+      portrait ? 360 : 1120,
+      portrait ? 1172 : 661,
+      portrait ? 560 : 250,
+      portrait ? 70 : 58,
+      'EXIT RUN',
+      () => this.scene.start('Menu'),
+      { fill: COLORS.muted, fontSize: portrait ? 20 : 18 }
+    );
+  }
+
   private requestLane(direction: -1 | 1): void {
     if (this.complete || !this.player) return;
     const next = Phaser.Math.Clamp(this.targetLane + direction, 0, 2) as Lane;
     if (next === this.targetLane) return;
+    const column = Math.max(0, Math.floor(this.positionColumns));
+    const nextEvents = appendReplaySafeLaneEvent(this.laneEvents, column, next);
+    if (nextEvents === this.laneEvents) return;
+    this.laneEvents = [...nextEvents];
     this.targetLane = next;
-    this.recordLaneEvent(next);
     this.tweens.killTweensOf(this.player);
     this.tweens.add({
       targets: this.player,
-      y: LANE_Y[next],
+      y: this.geometry.laneYs[next],
       duration: LANE_TWEEN_MS,
       ease: 'Sine.easeInOut',
       onComplete: () => {
@@ -297,18 +375,15 @@ export class RunnerScene extends Phaser.Scene {
   }
 
   private laneFromPointerY(y: number): Lane {
-    if (y < (LANE_Y[0] + LANE_Y[1]) / 2) return 0;
-    if (y > (LANE_Y[1] + LANE_Y[2]) / 2) return 2;
+    const [top, middle, bottom] = this.geometry.laneYs;
+    if (y < (top + middle) / 2) return 0;
+    if (y > (middle + bottom) / 2) return 2;
     return 1;
   }
 
   private isPlayfieldPointer(pointer: Phaser.Input.Pointer): boolean {
-    return (
-      pointer.x >= PLAYFIELD_LEFT &&
-      pointer.x <= PLAYFIELD_RIGHT &&
-      pointer.y >= PLAYFIELD_TOP &&
-      pointer.y <= PLAYFIELD_BOTTOM
-    );
+    const { left, right, top, bottom } = this.geometry.playfield;
+    return pointer.x >= left && pointer.x <= right && pointer.y >= top && pointer.y <= bottom;
   }
 
   private processColumn(column: number): void {
@@ -330,16 +405,6 @@ export class RunnerScene extends Phaser.Scene {
       this.parcelsCollected += 1;
       this.flashMessage('PARCEL +350', COLORS.reward);
     }
-  }
-
-  private recordLaneEvent(lane: Lane): void {
-    const column = Math.max(0, Math.floor(this.positionColumns));
-    const last = this.laneEvents.at(-1);
-    if (last?.column === column) {
-      last.lane = lane;
-      return;
-    }
-    this.laneEvents.push({ column, lane });
   }
 
   private takeDamage(message: string, slowdownMs: number): void {
@@ -382,37 +447,40 @@ export class RunnerScene extends Phaser.Scene {
 
     this.drawProceduralScenery(scenery);
     const startColumn = Math.max(0, Math.floor(this.positionColumns) - 3);
-    const visibleColumns = 14;
+    const { columnWidth, playerX, visibleColumns, laneYs, playfield } = this.geometry;
     for (let offset = 0; offset < visibleColumns; offset += 1) {
       const columnIndex = startColumn + offset;
       const cells = this.columns[columnIndex];
       if (!cells) continue;
-      const x = PLAYER_X + (columnIndex - this.positionColumns) * COLUMN_WIDTH;
+      const x = playerX + (columnIndex - this.positionColumns) * columnWidth;
       for (let laneIndex = 0; laneIndex < 3; laneIndex += 1) {
         const cell = cells[laneIndex];
         if (!cell) continue;
-        const y = LANE_Y[laneIndex as Lane];
+        const y = laneYs[laneIndex as Lane];
         if (cell.terrain === 'road') {
           graphics
             .fillStyle(COLORS.ground, 1)
-            .fillRect(x - COLUMN_WIDTH / 2, y + 24, COLUMN_WIDTH, 76);
+            .fillRect(x - columnWidth / 2, y + 24, columnWidth, 76);
           this.showRouteSprite(`road:${columnIndex}:${laneIndex}`, 'road-surface', x, y + 50, {
-            width: 96,
+            width: columnWidth,
             height: 58,
             alpha: 0.94,
             depth: 2.2,
           });
           graphics
             .fillStyle(COLORS.road, 1)
-            .fillRoundedRect(x - COLUMN_WIDTH / 2, y + 14, COLUMN_WIDTH + 1, 18, 8);
+            .fillRoundedRect(x - columnWidth / 2, y + 14, columnWidth + 1, 18, 8);
           graphics
             .lineStyle(2, COLORS.ink, 0.45)
-            .strokeRoundedRect(x - COLUMN_WIDTH / 2, y + 14, COLUMN_WIDTH + 1, 18, 8);
+            .strokeRoundedRect(x - columnWidth / 2, y + 14, columnWidth + 1, 18, 8);
         } else {
           graphics.fillStyle(COLORS.skyDark, 0.15).fillRoundedRect(x - 35, y + 18, 70, 22, 6);
         }
 
         if (cell.feature === 'obstacle') {
+          graphics.fillStyle(COLORS.warning, 0.28).fillRoundedRect(x - 36, y - 39, 72, 72, 12);
+          graphics.lineStyle(4, COLORS.warning, 0.95).strokeRoundedRect(x - 36, y - 39, 72, 72, 12);
+          graphics.lineStyle(2, COLORS.white, 0.92).strokeRoundedRect(x - 30, y - 33, 60, 60, 9);
           if (!this.showFeatureSprite(columnIndex, laneIndex as Lane, cell.feature, x, y - 3)) {
             graphics.fillStyle(COLORS.warning, 1).fillRoundedRect(x - 19, y - 20, 38, 38, 6);
             graphics.lineStyle(3, COLORS.ink, 1).strokeRoundedRect(x - 19, y - 20, 38, 38, 6);
@@ -428,6 +496,9 @@ export class RunnerScene extends Phaser.Scene {
               .strokeTriangle(x - 26, y + 15, x + 26, y + 15, x, y - 17);
           }
         } else if (cell.feature === 'parcel') {
+          graphics.fillStyle(COLORS.reward, 0.32).fillCircle(x, y - 11, 36);
+          graphics.lineStyle(4, COLORS.reward, 1).strokeCircle(x, y - 11, 36);
+          graphics.lineStyle(2, COLORS.white, 0.94).strokeCircle(x, y - 11, 29);
           if (!this.showFeatureSprite(columnIndex, laneIndex as Lane, cell.feature, x, y - 11)) {
             graphics.fillStyle(COLORS.reward, 1).fillRoundedRect(x - 16, y - 25, 32, 29, 5);
             graphics.lineStyle(2, COLORS.ink, 1).strokeRoundedRect(x - 16, y - 25, 32, 29, 5);
@@ -441,7 +512,9 @@ export class RunnerScene extends Phaser.Scene {
         this.drawFinishMarker(graphics, x);
       }
       if (columnIndex > 0 && columnIndex % tileWidth === 0) {
-        graphics.lineStyle(3, COLORS.ink, 0.24).lineBetween(x, 136, x, 598);
+        graphics
+          .lineStyle(3, COLORS.ink, 0.24)
+          .lineBetween(x, playfield.top + 18, x, playfield.bottom - 18);
         const tileIndex = Math.floor(columnIndex / tileWidth);
         const tile = this.route.tiles[tileIndex];
         if (tile) {
@@ -457,18 +530,30 @@ export class RunnerScene extends Phaser.Scene {
 
   private drawProceduralScenery(graphics: Phaser.GameObjects.Graphics): void {
     const seed = this.route.recipe.visualSeed;
-    graphics.fillStyle(COLORS.paper, 0.28).fillRect(0, 114, 1280, 500);
+    const portrait = this.layout.mode === 'portrait';
+    const width = this.layout.width;
+    const { top, bottom } = this.geometry.playfield;
+    graphics.fillStyle(COLORS.paper, 0.28).fillRect(0, top - 18, width, bottom - top + 36);
     graphics.fillStyle(0xffffff, 0.34);
     for (let index = 0; index < 7; index += 1) {
-      const x = ((index * 229 + seed) % 1420) - 80 - ((this.positionColumns * 10) % 140);
-      const y = 128 + ((index * 47 + seed) % 75);
+      const x = ((index * 229 + seed) % (width + 140)) - 70 - ((this.positionColumns * 10) % 140);
+      const y = top + 10 + ((index * 47 + seed) % (portrait ? 150 : 75));
       graphics
         .fillCircle(x, y, 32)
         .fillCircle(x + 34, y + 7, 26)
         .fillCircle(x - 30, y + 9, 23);
     }
-    graphics.fillStyle(COLORS.secondary, 0.22).fillTriangle(0, 370, 280, 160, 560, 370);
-    graphics.fillStyle(COLORS.skyDark, 0.18).fillTriangle(420, 370, 760, 145, 1100, 370);
+    if (portrait) {
+      graphics
+        .fillStyle(COLORS.secondary, 0.18)
+        .fillTriangle(0, bottom, 190, top + 90, 380, bottom);
+      graphics
+        .fillStyle(COLORS.skyDark, 0.16)
+        .fillTriangle(250, bottom, 490, top + 55, 720, bottom);
+    } else {
+      graphics.fillStyle(COLORS.secondary, 0.22).fillTriangle(0, 370, 280, 160, 560, 370);
+      graphics.fillStyle(COLORS.skyDark, 0.18).fillTriangle(420, 370, 760, 145, 1100, 370);
+    }
   }
 
   private hideTileLabels(): void {
@@ -492,8 +577,8 @@ export class RunnerScene extends Phaser.Scene {
   ): boolean {
     if (feature === 'obstacle') {
       return this.showRouteSprite(`feature:${column}:${lane}`, 'obstacle-crate', x, y, {
-        width: 44,
-        height: 44,
+        width: 58,
+        height: 58,
         depth: 3.5,
       });
     }
@@ -506,8 +591,8 @@ export class RunnerScene extends Phaser.Scene {
     }
     if (feature === 'parcel') {
       return this.showRouteSprite(`feature:${column}:${lane}`, 'collectible-stamp', x, y, {
-        width: 36,
-        height: 36,
+        width: 50,
+        height: 50,
         depth: 3.5,
       });
     }
@@ -539,11 +624,12 @@ export class RunnerScene extends Phaser.Scene {
   }
 
   private showTileLabel(tileIndex: number, label: string, x: number): void {
-    if (x < 0 || x > 1280) return;
+    if (x < 0 || x > this.layout.width) return;
+    const y = this.geometry.playfield.top - 12;
     let text = this.tileLabels.get(tileIndex);
     if (!text) {
       text = this.add
-        .text(x + 8, 117, label, {
+        .text(x + 8, y, label, {
           fontFamily: FONT_FAMILY,
           fontSize: '12px',
           fontStyle: 'bold',
@@ -554,29 +640,30 @@ export class RunnerScene extends Phaser.Scene {
     }
     text
       .setText(label)
-      .setPosition(x + 8, 117)
+      .setPosition(x + 8, y)
       .setVisible(true);
   }
 
   private drawFinishMarker(graphics: Phaser.GameObjects.Graphics, x: number): void {
-    if (x < -80 || x > 1360) return;
-    graphics.lineStyle(5, COLORS.ink, 0.72).lineBetween(x + 46, 136, x + 46, 598);
+    if (x < -80 || x > this.layout.width + 80) return;
+    const { top, bottom } = this.geometry.playfield;
+    graphics.lineStyle(5, COLORS.ink, 0.72).lineBetween(x + 46, top + 18, x + 46, bottom - 18);
     for (let row = 0; row < 9; row += 1) {
       for (let column = 0; column < 2; column += 1) {
         const dark = (row + column) % 2 === 0;
         graphics
           .fillStyle(dark ? COLORS.ink : COLORS.white, dark ? 0.92 : 0.82)
-          .fillRect(x + 48 + column * 18, 144 + row * 18, 18, 18);
+          .fillRect(x + 48 + column * 18, top + 26 + row * 18, 18, 18);
       }
     }
     graphics
       .fillStyle(COLORS.paper, 0.94)
-      .fillRoundedRect(x - 34, 122, 132, 34, 8)
+      .fillRoundedRect(x - 34, top + 4, 132, 34, 8)
       .lineStyle(2, COLORS.ink, 0.6)
-      .strokeRoundedRect(x - 34, 122, 132, 34, 8);
+      .strokeRoundedRect(x - 34, top + 4, 132, 34, 8);
     if (!this.finishLabel) {
       this.finishLabel = this.add
-        .text(x + 32, 130, 'FINISH', {
+        .text(x + 32, top + 12, 'FINISH', {
           fontFamily: FONT_FAMILY,
           fontSize: '15px',
           fontStyle: 'bold',
@@ -585,25 +672,46 @@ export class RunnerScene extends Phaser.Scene {
         .setOrigin(0.5, 0)
         .setDepth(4);
     }
-    this.finishLabel.setPosition(x + 32, 130).setVisible(true);
+    this.finishLabel.setPosition(x + 32, top + 12).setVisible(true);
   }
 
-  private getFeedbackText(): Phaser.GameObjects.Text {
-    if (!this.feedbackText) {
-      this.feedbackText = this.add
-        .text(580, 112, '', {
-          fontFamily: FONT_FAMILY,
-          fontSize: '24px',
-          fontStyle: 'bold',
-          color: '#72bf9b',
-          backgroundColor: '#fff7dfdd',
-          padding: { x: 14, y: 8 },
-        })
-        .setOrigin(0.5, 0)
-        .setDepth(12)
-        .setVisible(false);
-    }
-    return this.feedbackText;
+  private resetSceneObjects(): void {
+    this.player = undefined;
+    this.courseGraphics = undefined;
+    this.sceneryGraphics = undefined;
+    this.touchGuideGraphics = undefined;
+    this.pipGraphics = undefined;
+    this.statsText = undefined;
+    this.controlsText = undefined;
+    this.keyboard = undefined;
+    this.pointerStartY = undefined;
+    this.pointerStartedInPlayfield = false;
+    this.pointerMovedLane = false;
+    this.wheelA = undefined;
+    this.wheelB = undefined;
+    this.parcelVisual = undefined;
+    this.tileLabels.clear();
+    this.routeSprites.clear();
+    this.finishLabel = undefined;
+    this.feedbackText = undefined;
+    this.feedbackTween = undefined;
+  }
+
+  private createFeedbackText(): Phaser.GameObjects.Text {
+    const x = this.layout.mode === 'portrait' ? 360 : 580;
+    const y = this.layout.mode === 'portrait' ? 250 : 112;
+    return this.add
+      .text(x, y, 'READY', {
+        fontFamily: FONT_FAMILY,
+        fontSize: '24px',
+        fontStyle: 'bold',
+        color: '#72bf9b',
+        backgroundColor: '#fff7dfdd',
+        padding: { x: 14, y: 8 },
+      })
+      .setOrigin(0.5, 0)
+      .setDepth(12)
+      .setVisible(false);
   }
 
   private createTouchControls(): void {
@@ -611,28 +719,40 @@ export class RunnerScene extends Phaser.Scene {
     if (!graphics) return;
     graphics.clear();
     graphics.lineStyle(2, COLORS.white, 0.18);
-    for (const y of LANE_Y) {
-      graphics.strokeRoundedRect(PLAYFIELD_LEFT + 16, y - 62, PLAYFIELD_RIGHT - 66, 118, 16);
+    const { left, right } = this.geometry.playfield;
+    const guideHeight = this.layout.mode === 'portrait' ? 184 : 118;
+    for (const y of this.geometry.laneYs) {
+      graphics.strokeRoundedRect(
+        left + 12,
+        y - guideHeight / 2,
+        right - left - 24,
+        guideHeight,
+        16
+      );
     }
   }
 
   private flashMessage(message: string, color: number = COLORS.secondary): void {
-    const text = this.getFeedbackText();
+    const text = this.feedbackText?.active
+      ? this.feedbackText
+      : (this.feedbackText = this.createFeedbackText());
+    const x = this.layout.mode === 'portrait' ? 360 : 580;
+    const y = this.layout.mode === 'portrait' ? 250 : 112;
     this.feedbackTween?.stop();
     text
       .setText(message)
       .setColor(`#${color.toString(16).padStart(6, '0')}`)
-      .setPosition(580, 112)
+      .setPosition(x, y)
       .setAlpha(1)
       .setVisible(true);
     this.feedbackTween = this.tweens.add({
       targets: text,
       alpha: 0,
-      y: 88,
+      y: y - 24,
       delay: 550,
       duration: 350,
       onComplete: () => {
-        text.setVisible(false).setPosition(580, 112);
+        text.setVisible(false).setPosition(x, y);
       },
     });
   }
@@ -658,8 +778,11 @@ export class RunnerScene extends Phaser.Scene {
 
   private drawStaticFrame(): void {
     const frame = this.add.graphics().setDepth(7);
-    frame.fillStyle(COLORS.paper, 0.92).fillRoundedRect(20, 15, 1045, 90, 20);
-    frame.lineStyle(3, COLORS.ink, 0.65).strokeRoundedRect(20, 15, 1045, 90, 20);
+    const portrait = this.layout.mode === 'portrait';
+    const width = portrait ? 680 : 1045;
+    const height = portrait ? 178 : 90;
+    frame.fillStyle(COLORS.paper, 0.92).fillRoundedRect(20, 15, width, height, 20);
+    frame.lineStyle(3, COLORS.ink, 0.65).strokeRoundedRect(20, 15, width, height, 20);
   }
 
   private updateHud(): void {
@@ -678,19 +801,21 @@ export class RunnerScene extends Phaser.Scene {
     const graphics = this.pipGraphics;
     if (!graphics) return;
     graphics.clear();
+    const startX = this.layout.mode === 'portrait' ? 172 : 240;
+    const y = this.layout.mode === 'portrait' ? 103 : 76;
     for (let index = 0; index < 3; index += 1) {
-      const x = 240 + index * 42;
+      const x = startX + index * 42;
       const filled = index < this.integrity;
       graphics
         .fillStyle(filled ? COLORS.reward : COLORS.white, filled ? 1 : 0.3)
-        .fillCircle(x, 76, 15)
+        .fillCircle(x, y, 15)
         .lineStyle(3, filled ? COLORS.ink : COLORS.warning, filled ? 0.95 : 0.75)
-        .strokeCircle(x, 76, 15);
+        .strokeCircle(x, y, 15);
       if (!filled) {
         graphics
           .lineStyle(3, COLORS.warning, 0.85)
-          .lineBetween(x - 8, 68, x + 8, 84)
-          .lineBetween(x + 8, 68, x - 8, 84);
+          .lineBetween(x - 8, y - 8, x + 8, y + 8)
+          .lineBetween(x + 8, y - 8, x - 8, y + 8);
       }
     }
   }
@@ -700,9 +825,15 @@ export class RunnerScene extends Phaser.Scene {
       this.mode === 'preview'
         ? 'BUILDER TEST'
         : this.mode === 'random'
-          ? 'ROADBOOK SHUFFLE'
+          ? 'ROADBOOK RIDE'
           : 'DAILY DASH';
-    return `${prefix} · ${this.route.recipe.tenantName}`;
+    return this.layout.mode === 'portrait' ? prefix : `${prefix} · ${this.route.recipe.tenantName}`;
+  }
+
+  private routeTenantLabel(): string {
+    const value = this.route.recipe.tenantName.replace(/^r\//i, '');
+    const maximum = 32;
+    return `r/${value.length > maximum ? `${value.slice(0, maximum - 1)}…` : value}`;
   }
 
   private routeMetaLabel(): string {
@@ -727,7 +858,7 @@ export class RunnerScene extends Phaser.Scene {
                 difficultyValues.length
             )
           )}/5`;
-    return `${this.route.recipe.dateKey} · REV ${this.route.recipe.revision} · ${routeDifficulty} · ${communityPercent}% COMMUNITY`;
+    return `${this.route.recipe.dateKey} · VERSION ${this.route.recipe.revision} · DIFFICULTY ${routeDifficulty} · ${communityPercent}% COMMUNITY-BUILT`;
   }
 
   private async beginServerRun(): Promise<void> {
@@ -738,7 +869,9 @@ export class RunnerScene extends Phaser.Scene {
         routeRevision: response.run.routeRevision,
         startedAtMs: this.time.now,
       };
-    } catch {
+    } catch (caught) {
+      this.rankedStartFailure =
+        caught instanceof Error ? caught.message : 'Ranked run could not start.';
       this.activeRun = {
         token: 'local-run',
         routeRevision: this.route.recipe.revision,
@@ -768,16 +901,28 @@ export class RunnerScene extends Phaser.Scene {
       userId: 'local-player',
       username: 'Local Player',
       score: scoreRun(submission),
+      distanceColumns: completed
+        ? this.columns.length
+        : clampDistanceColumns(Math.floor(this.positionColumns) + 1, this.columns.length),
       completedAt: new Date().toISOString(),
     };
+
+    let persistence: 'ranked' | 'practice' = 'practice';
+    let persistenceMessage =
+      this.mode === 'preview'
+        ? 'PRACTICE TEST · NOT RANKED'
+        : `PRACTICE RESULT · ${this.rankedStartFailure ?? 'RANKED SAVE UNAVAILABLE'}`;
 
     if (this.mode !== 'preview' && this.activeRun.token !== 'local-run') {
       try {
         const response = await apiClient.completeRun(submission);
         result = response.result;
         session.profile = response.profile;
-      } catch {
-        // Preserve a complete local result when Redis or the playtest server is unavailable.
+        persistence = 'ranked';
+        persistenceMessage = 'RANKED RESULT SAVED';
+      } catch (caught) {
+        const message = caught instanceof Error ? caught.message : 'Ranked save failed.';
+        persistenceMessage = `PRACTICE RESULT · ${message}`;
       }
     }
 
@@ -785,6 +930,9 @@ export class RunnerScene extends Phaser.Scene {
       result,
       route: this.route,
       mode: this.mode,
+      persistence,
+      persistenceMessage,
+      ...(this.builderReturn ? { builderReturn: this.builderReturn } : {}),
     });
   }
 }

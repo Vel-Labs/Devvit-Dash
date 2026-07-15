@@ -35,6 +35,7 @@ Use an in-memory tenant-store adapter to test:
 - run token consumption;
 - leaderboard personal best;
 - deletion and route revision.
+- immutable route-revision replay and atomic duplicate completion rejection.
 
 ### Device/playtest matrix
 
@@ -44,6 +45,21 @@ Use an in-memory tenant-store adapter to test:
 - Slow network and failed API.
 - anonymous practice and authenticated ranked mode.
 - reduced motion and mute.
+
+## Refinement candidate live boundary — 2026-07-13
+
+Playtest `v0.0.1.13` passed an authenticated-owner Chrome session at an
+emulated `390x844` viewport. The session covered inline entry, expanded Menu,
+two consecutive ranked runs through Results, Builder invalid/certified states,
+one publish, Creator Card truth labels, and Reddit-native sharing. The prior
+second-run stale Phaser-object crash did not recur, and the runtime log contained
+no matching critical error.
+
+This evidence does not substitute for the remaining QC rows: fresh non-owner
+publish/reload, physical portrait/landscape Reddit clients, a successful ranked
+finish and live duplicate-completion probe, independently located PNG output,
+or report/remove/route-repair. The exact session order and stop rules live in
+[`../goals/daily-dash-hackathon-refinement-v1/notes/QC-DOGFOODING-ENTRY.md`](../goals/daily-dash-hackathon-refinement-v1/notes/QC-DOGFOODING-ENTRY.md).
 
 ## Fairness metrics
 
@@ -73,7 +89,8 @@ Flag rather than automatically delete:
 - No obstacle can damage multiple times during one invulnerability window.
 - Gaps always recover to a valid lane.
 - Tile seams reset transient state.
-- Route result and leaderboard storage use the same revision the run began on.
+- Route completion replays the immutable `RouteBundle` revision issued at run start; repaired current geometry cannot replace it.
+- The one-use token is claimed with a watched Redis transaction only after validation, so at most one duplicate request can proceed to ranked persistence.
 - Ranked score counters are derived from server replay of submitted lane events.
 
 ## Performance budgets
@@ -88,7 +105,7 @@ Flag rather than automatically delete:
 ## Current scaffold caveats
 
 - Runner rendering is still a functional vector prototype, with initial text-object pooling in place for seam labels and feedback messages.
-- Result submission now uses server-side lane-event replay for score counters. Further hardening should calibrate speed/tween timing against live playtest telemetry.
+- Result submission now requires an exact revision, uses server-side lane-event replay for score counters, and claims the token atomically after validation. Further hardening should calibrate speed/tween timing against live playtest telemetry.
 - Reaction-margin validation covers one-lane forced switches, same-direction two-lane migrations, camera-lookahead destination checks, lane/column issue evidence, and Builder issue-cell highlighting.
 
 These are explicit launch tasks, not hidden assumptions.

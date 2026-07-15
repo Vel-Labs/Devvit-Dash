@@ -1,5 +1,6 @@
 import { context, reddit } from '@devvit/web/server';
 import type { TenantIdentity } from '../../shared/game/types';
+import { tenantStore } from '../repositories/tenantStore';
 
 export const getTenantIdentity = (): TenantIdentity => {
   const name = context.subredditName ?? 'daily-dash-playtest';
@@ -11,13 +12,23 @@ export const getCurrentPlayer = async (): Promise<{
   userId: string;
   username: string;
   authenticated: boolean;
+  profileUrl?: string;
 }> => {
-  const username = (await reddit.getCurrentUsername()) ?? 'anonymous';
+  let currentUser: Awaited<ReturnType<typeof reddit.getCurrentUser>>;
+  try {
+    currentUser = await reddit.getCurrentUser();
+  } catch {
+    currentUser = undefined;
+  }
+  const username = currentUser?.username ?? (await reddit.getCurrentUsername()) ?? 'anonymous';
   const userId = context.userId ?? `anonymous:${context.postId ?? 'post'}`;
+  const authenticated = Boolean(context.userId && username !== 'anonymous');
+  if (authenticated) await tenantStore.touchUserActivity(userId);
   return {
     userId,
     username,
-    authenticated: Boolean(context.userId && username !== 'anonymous'),
+    authenticated,
+    ...(currentUser?.url ? { profileUrl: currentUser.url } : {}),
   };
 };
 

@@ -27,9 +27,29 @@ export const getOrCreateProfile = async (
   if (existing) {
     existing.username = username;
     existing.tenantId = tenantId;
+    // Profiles created before Route Passport did not persist these fields.
+    // Start tracking from zero rather than inventing incomplete historical totals.
+    existing.stats.failedDeliveries ??= 0;
+    existing.stats.distanceColumnsTraveled ??= 0;
     return existing;
   }
   return createProfile(userId, username, tenantId);
+};
+
+export const reconcileFeaturedTileProgress = (
+  profile: PlayerProfile,
+  routes: readonly RouteBundle[]
+): PlayerProfile => {
+  const featuredTileIds = new Set(
+    routes.flatMap((route) =>
+      route.tiles
+        .filter((tile) => tile.authorId === profile.userId && tile.status !== 'removed')
+        .map((tile) => tile.id)
+    )
+  );
+  profile.stats.tilesFeatured = Math.max(profile.stats.tilesFeatured, featuredTileIds.size);
+  profile.unlocked = evaluateAchievementUnlocks(profile.stats, profile.unlocked);
+  return profile;
 };
 
 export const recordCertifiedTile = async (
@@ -47,13 +67,13 @@ export const recordCertifiedTile = async (
 
 export const recordFeaturedTiles = async (route: RouteBundle): Promise<void> => {
   const uniqueAuthors = new Set<string>();
+  const routes = await tenantStore.listRoutes();
   for (const tile of route.tiles) {
     if (tile.authorId === 'daily-dash-founders' || uniqueAuthors.has(tile.authorId)) continue;
     uniqueAuthors.add(tile.authorId);
     const profile = await tenantStore.getProfile(tile.authorId);
     if (!profile) continue;
-    profile.stats.tilesFeatured += 1;
-    profile.unlocked = evaluateAchievementUnlocks(profile.stats, profile.unlocked);
+    reconcileFeaturedTileProgress(profile, routes);
     await tenantStore.saveProfile(profile);
     await tenantStore.incrementFeatured(tile.id);
   }
@@ -65,6 +85,7 @@ export const recordCompletedRun = async (
   tenantId: string
 ): Promise<PlayerProfile> => {
   const profile = await getOrCreateProfile(run.userId, run.username, tenantId);
+  profile.stats.distanceColumnsTraveled += run.distanceColumns;
   if (run.completed) {
     profile.stats.runsCompleted += 1;
     if (run.damageTaken === 0) profile.stats.cleanRuns += 1;
@@ -73,6 +94,8 @@ export const recordCompletedRun = async (
       profile.stats.uniqueRoutesCompleted = profile.completedRouteIds.length;
     }
     updateStreak(profile, dateKeyUtc(new Date(run.completedAt)));
+  } else {
+    profile.stats.failedDeliveries += 1;
   }
   profile.unlocked = evaluateAchievementUnlocks(profile.stats, profile.unlocked);
   await tenantStore.saveProfile(profile);

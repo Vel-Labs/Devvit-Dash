@@ -4,6 +4,7 @@ import type {
   CompleteRunRequest,
   CompleteRunResponse,
   CreatorOutcomeResponse,
+  DeleteMyDataResponse,
   LeaderboardResponse,
   RemoveTileRequest,
   RemoveTileResponse,
@@ -50,6 +51,8 @@ export const apiClient = {
   routes: (): Promise<RoutesResponse> => requestJson('/api/routes'),
   randomRoute: (): Promise<RouteResponse> => requestJson('/api/routes/random'),
   creatorOutcome: (): Promise<CreatorOutcomeResponse> => requestJson('/api/creator/outcome'),
+  deleteMyData: (): Promise<DeleteMyDataResponse> =>
+    requestJson('/api/profile', { method: 'DELETE' }),
   submitTile: (tile: CourseTile): Promise<SubmitTileResponse> =>
     requestJson('/api/tiles', {
       method: 'POST',

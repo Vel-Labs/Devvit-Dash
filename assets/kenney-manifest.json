@@ -29,5 +29,28 @@
     "collectible-stamp": "items/coin-gold.png",
     "background-far": "backgrounds/blue-grass.png",
     "background-near": "terrain/grass-center.png"
-  }
+  },
+  "generatedAssets": [
+    {
+      "role": "route-passport-seal",
+      "path": "share/route-passport-seal.png",
+      "generator": "OpenAI ImageGen",
+      "createdAt": "2026-07-15",
+      "provenance": "Project-owned generated asset derived from the user-selected Route Passport visual direction."
+    },
+    {
+      "role": "clean-delivery-parcel",
+      "path": "share/clean-delivery-parcel.png",
+      "generator": "OpenAI ImageGen",
+      "createdAt": "2026-07-15",
+      "provenance": "Project-owned generated asset derived from the user-selected Route Passport visual direction."
+    },
+    {
+      "role": "failed-delivery-parcel",
+      "path": "share/failed-delivery-parcel.png",
+      "generator": "OpenAI ImageGen",
+      "createdAt": "2026-07-15",
+      "provenance": "Project-owned generated asset derived from the user-selected Route Passport visual direction."
+    }
+  ]
 }

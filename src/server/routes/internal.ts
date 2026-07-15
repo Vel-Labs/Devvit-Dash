@@ -6,6 +6,7 @@ import { createGamePost } from '../core/post';
 import { getTenantIdentity } from '../core/identity';
 import { tenantStore } from '../repositories/tenantStore';
 import { ensureDailyRoute } from '../services/routeService';
+import { runWeeklyMaintenance } from '../services/dataLifecycleService';
 
 export const internal = new Hono();
 
@@ -68,10 +69,10 @@ internal.post('/scheduler/compile-daily-route', async (c) => {
 
 internal.post('/scheduler/weekly-maintenance', async (c) => {
   await c.req.json<TaskRequest>();
+  const result = await runWeeklyMaintenance(getTenantIdentity());
   const response: TaskResponse = {
     status: 'ok',
-    message:
-      'Weekly maintenance checkpoint completed. See DATA_AND_LEVEL_PIPELINE.md for bounded cleanup work.',
+    message: `Weekly maintenance anonymized ${result.inactiveUsersAnonymized} inactive users, expired ${result.submissionDatesDeleted} submission dates, ${result.reportsDeleted} reports, and ${result.settingsDeleted} post settings; backfilled ${result.activityBackfilled} activity records and ${result.submissionDatesBackfilled} submission dates.`,
   };
   return c.json(response);
 });

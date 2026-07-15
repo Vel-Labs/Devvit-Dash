@@ -16,4 +16,9 @@ if (manifest.mode === 'kenney') {
     await access(`public/assets/kenney/${path}`);
   }
 }
+for (const asset of manifest.generatedAssets ?? []) {
+  if (!asset.role || !asset.path || !asset.generator || !asset.provenance)
+    throw new Error('Generated art provenance is incomplete.');
+  await access(`public/assets/${asset.path}`);
+}
 console.log(`Art manifest valid in ${manifest.mode} mode.`);

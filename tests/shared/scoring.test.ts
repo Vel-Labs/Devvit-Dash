@@ -6,6 +6,7 @@ describe('runner scoring', () => {
     expect(
       scoreRun({
         routeId: 'r',
+        routeRevision: 1,
         elapsedMs: 20_000,
         damageTaken: 0,
         parcelsCollected: 3,
@@ -16,6 +17,7 @@ describe('runner scoring', () => {
     expect(
       scoreRun({
         routeId: 'r',
+        routeRevision: 1,
         elapsedMs: 20_000,
         damageTaken: 0,
         parcelsCollected: 3,
@@ -28,6 +30,7 @@ describe('runner scoring', () => {
   it('rewards clean runs over otherwise identical damaged runs', () => {
     const clean = scoreRun({
       routeId: 'r',
+      routeRevision: 1,
       elapsedMs: 30_000,
       damageTaken: 0,
       parcelsCollected: 2,
@@ -36,6 +39,7 @@ describe('runner scoring', () => {
     });
     const damaged = scoreRun({
       routeId: 'r',
+      routeRevision: 1,
       elapsedMs: 30_000,
       damageTaken: 2,
       parcelsCollected: 2,

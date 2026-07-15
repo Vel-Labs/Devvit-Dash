@@ -1,6 +1,6 @@
 # Hackathon Rules Compliance
 
-Source status: summarized from the official rules copy provided on 2026-06-28 and live source links checked on 2026-06-28. This is an engineering checklist, not legal advice. If this document conflicts with the official rules, Devpost, Reddit Developer Platform terms, Devvit Rules, or Reddit policies, the official source controls.
+Source status: live Devpost overview and official rules rechecked on 2026-07-13; current Devvit Rules and platform configuration were also rechecked during the refinement audit. This is an engineering checklist, not legal advice. If this document conflicts with the official rules, Devpost, Reddit Developer Platform terms, Devvit Rules, or Reddit policies, the official source controls.
 
 ## Source Links
 
@@ -35,6 +35,7 @@ Source status: summarized from the official rules copy provided on 2026-06-28 an
 - The app must run consistently on its intended platform and match the submitted text/video description.
 - If the project existed before the submission period, the submission must explain the significant updates made during the submission period.
 - The submitted app must not be a prior Reddit hackathon winner.
+- Submission copy should identify the significant post-June-17 work: responsive mobile layouts, constrained UGC repair UX, creator share card, immutable ranked route replay, owner data deletion/retention, and submission-focused QA.
 
 ## Submission Package Checklist
 
@@ -47,6 +48,7 @@ Source status: summarized from the official rules copy provided on 2026-06-28 an
 - Optional demo video under one minute, publicly visible on an approved video host, showing the app functioning on its target device.
 - Optional Developer Platform feedback survey if pursuing the feedback prize.
 - English-language submission materials, or English translations for all submitted materials.
+- Keep the public demo free and available without restriction through the end of judging on July 27, 2026.
 
 ## Rights, Assets, and Privacy
 
@@ -81,6 +83,7 @@ Source status: summarized from the official rules copy provided on 2026-06-28 an
 - Phaser category: use Phaser meaningfully for the Builder, Runner, route visualization, input, animation, and polish.
 - Retention category: daily routes, Roadbook history, streaks, leaderboards, achievements, and visible creator outcomes are the relevant mechanics.
 - User contribution category: certified community-authored tiles are the core user-generated gameplay surface.
+- Avoid the organizer's explicit polish failure modes: viewport overflow, generic/unfitted presentation, obvious agent-generated roughness, and Reddit theming that substitutes for community mechanics.
 
 ## Local Stop Rules
 

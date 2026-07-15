@@ -7,13 +7,18 @@ import { MenuScene } from './scenes/MenuScene';
 import { ResultScene } from './scenes/ResultScene';
 import { RoadbookScene } from './scenes/RoadbookScene';
 import { RunnerScene } from './scenes/RunnerScene';
+import { getCurrentViewportLayout } from './layout';
+
+const initialLayout = getCurrentViewportLayout();
+const preserveQaCaptureBuffer =
+  new URLSearchParams(window.location.search).get('qaCapture') === '1';
 
 const config: Phaser.Types.Core.GameConfig = {
   type: Phaser.AUTO,
   parent: 'game-container',
   backgroundColor: '#aedfd8',
-  width: 1280,
-  height: 720,
+  width: initialLayout.width,
+  height: initialLayout.height,
   scale: {
     mode: Phaser.Scale.FIT,
     autoCenter: Phaser.Scale.CENTER_BOTH,
@@ -21,6 +26,7 @@ const config: Phaser.Types.Core.GameConfig = {
   render: {
     antialias: true,
     pixelArt: false,
+    preserveDrawingBuffer: preserveQaCaptureBuffer,
   },
   scene: [
     BootScene,

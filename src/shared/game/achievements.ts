@@ -73,6 +73,8 @@ export const createEmptyStats = (): PlayerStats => ({
   tilesFeatured: 0,
   runsCompleted: 0,
   cleanRuns: 0,
+  failedDeliveries: 0,
+  distanceColumnsTraveled: 0,
   uniqueRoutesCompleted: 0,
   currentStreak: 0,
   bestStreak: 0,

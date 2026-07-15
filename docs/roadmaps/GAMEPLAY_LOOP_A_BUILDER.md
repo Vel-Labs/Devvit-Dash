@@ -12,13 +12,14 @@ The Builder is a constrained creation game, not a professional level editor. Its
 Open Builder
   → receive blank 3×18 tile with locked connectors
   → select road/gap/obstacle/boost/parcel tool
-  → drag or tap to paint cells
-  → watch budget and warnings update
+  → drag or tap to paint cells; tap the same item again to remove it
+  → watch selected-item count, build points, and warnings update
   → certify
   → inspect safe-path overlay and metrics
   → test ride using Evergreen runner
   → revise or publish
-  → after publish, choose Test My Tile, Ride Today, Try Yesterday, or Roadbook
+  → after publish, choose My Share Card, Test My Tile, Ride Today, Try Yesterday, or Roadbook
+  → from the share card, ride the server-provided current Daily Route
   → return later for feature/crossing outcome
 ```
 
@@ -66,7 +67,11 @@ The budget should make “fill every lane with hazards” impossible and make re
 | Parcel   |    1 |   7 |
 | Total    |    — |  24 |
 
-The UI shows remaining budget as physical “road stamps” or drafting tokens, not an abstract developer number.
+The UI distinguishes total build points from the selected tool's object count.
+For example, `BUILD POINTS 18/24` and `ACTIVE TOOL: OBSTACLE · 9/9` are
+different constraints. A placement that would exceed either constraint is
+rejected immediately without changing the draft; certification repeats the
+same canonical checks.
 
 ## Certification contract
 
@@ -153,6 +158,7 @@ Only crossing count exists in the first code slice; route-choice analytics are a
 
 Publishing should not dead-end the creator in the editor. After a certified tile is saved, show clear next actions:
 
+- `My Share Card`: open the always-populated Route Passport immediately, with authoritative lifetime distance, featured tiles, clean deliveries, and failed deliveries plus Reddit/share-image actions.
 - `Test My Tile`: immediately play the tile inserted into a short test route. This is creator QA and must not create a ranked leaderboard entry.
 - `Ride Today`: start the current community route as a ranked run when the player is authenticated.
 - `Try Yesterday`: start the previous daily route if one exists in the local Roadbook.
@@ -160,11 +166,15 @@ Publishing should not dead-end the creator in the editor. After a certified tile
 
 The prompt reinforces the loop: create a small level insert, prove it is fair, then experience the subreddit’s current route. It also gives creators an obvious path to leaderboard play without implying that their just-published tile appears instantly in today’s route.
 
+While the post-publish prompt is open, the underlying Builder grid is input-shielded. Opening My Share Card clears gesture state and the prompt before changing scenes so the same tap cannot mutate a tile underneath the overlay.
+
 Practice/test ride labels must remain explicit. Ranked runs only apply to stored route id + revision combinations issued by the server.
 
 ## Mobile interaction
 
 - Tap tool, then drag through cells.
+- Tapping a cell that already contains the selected item removes it back to ordinary road.
+- Tapping an occupied cell with a different selected tool replaces the existing item.
 - A cell changes only once per continuous drag to avoid oscillation.
 - Long press is not required.
 - Locked connectors visibly reject paint.
@@ -195,6 +205,11 @@ Open the same runner with the candidate tile between neutral/founding flanks.
 
 Server rewrites identity and metadata, validates again, enforces one daily active submission, saves certified tile.
 
+Same-day re-entry is explicit: if the authenticated player already submitted,
+Builder first offers `Edit Today’s Tile` or `Start Fresh`. Both paths are local
+until Publish; publishing again updates the same server-certified daily record
+and says `updated` instead of implying a second creation.
+
 ### A5 — creator analytics
 
 Feature notification, crossing counter, path-choice events, balanced-design achievement.
@@ -202,6 +217,11 @@ Feature notification, crossing counter, path-choice events, balanced-design achi
 ### A6 — post-publish play continuation
 
 After publish, offer `Test My Tile`, `Ride Today`, `Try Yesterday`, and `Open Roadbook`. Test rides stay local/practice-only; ranked runs use server-issued route-revision tokens. Implemented locally on 2026-06-29; live persistence proof remains a separate QA gate.
+
+Builder test rides carry a defensive copy of the current draft and its entry
+intent through Runner and Results. `Back to Builder` restores that exact local
+draft rather than constructing an empty editor. This return payload is
+session-local and does not weaken server-authoritative Publish.
 
 ## Acceptance criteria
 
@@ -211,3 +231,8 @@ After publish, offer `Test My Tile`, `Ride Today`, `Try Yesterday`, and `Open Ro
 - A tile is recognizable when rendered inside a generated route.
 - Removing a tile removes it from future use and repairs existing route recipes.
 - Publishing a tile presents clear next play actions without ranking practice/test rides.
+- Returning on the same UTC day never silently starts over or silently overwrites:
+  the player chooses edit/fresh before Builder, and persisted state changes only
+  on Publish.
+- The tenth obstacle and any other cap/budget overflow fail at placement time.
+- Test Ride → Results → Back to Builder preserves the exact draft geometry.

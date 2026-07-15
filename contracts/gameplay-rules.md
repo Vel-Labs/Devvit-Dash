@@ -40,4 +40,16 @@ This document is normative. Code, UI text, tests, and roadmap decisions must not
 - Boost triggered: 75 points each, capped at 20.
 - Damage: minus 1,250 points per pip.
 - A failed delivery scores zero.
-- Ranked submissions include bounded lane-change events. The server derives damage, parcel count, boost count, completion, and score by replaying those events against stored route geometry.
+- Ranked submissions include bounded lane-change events. The server derives damage, parcel count, boost count, completion, score, and distance traveled by replaying those events against stored route geometry.
+- Distance is the count of logical road columns traversed, including the terminal failure column and capped at the stored route length. It has no scoring effect.
+- Results convert that authoritative count to a game-world distance at exactly ten meters per route column and display kilometers to two decimal places. The conversion is presentation only; the server-derived column count remains canonical.
+- A result may claim ranked persistence only after the completion endpoint accepts and stores it. Any local fallback remains playable but must be labeled practice and must not advance leaderboards or achievements.
+
+## Route Passport lifetime metrics
+
+- The Route Passport contains exactly four lifetime counters: authoritative distance traveled, unique featured tiles, clean deliveries, and failed deliveries.
+- Every accepted ranked run adds its replay-derived `distanceColumns` to the authenticated profile, including the partial distance of a failed delivery.
+- A clean delivery is an accepted completed run with zero replay-derived damage. A failed delivery is an accepted run whose replay-derived result did not reach the finish. Practice/local fallback runs advance neither counter.
+- Featured tiles reconcile from unique, non-removed authored tile IDs in durable routes and never count repeat appearances or revisions of the same tile twice.
+- Profiles created before these lifetime run fields existed initialize distance and failed deliveries to zero. Daily Dash does not infer incomplete historical totals from best-run snapshots.
+- The card displays cumulative distance in kilometers using the same ten-meters-per-column presentation conversion. This does not change replay, scoring, or server authority.

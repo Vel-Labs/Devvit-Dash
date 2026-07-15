@@ -5,6 +5,9 @@ body,
   height: 100%;
   margin: 0;
   overflow: hidden;
+  box-sizing: border-box;
+  padding: env(safe-area-inset-top, 0) env(safe-area-inset-right, 0) env(safe-area-inset-bottom, 0)
+    env(safe-area-inset-left, 0);
 }
 
 body {
@@ -20,4 +23,54 @@ canvas {
   display: block;
   image-rendering: auto;
   outline: none;
+  max-width: 100%;
+  max-height: 100%;
+}
+
+.sr-only,
+.game-semantic-action {
+  position: fixed;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+#game-actions {
+  position: fixed;
+  inset: 0 auto auto 0;
+  z-index: 1000;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  max-width: min(100%, 48rem);
+  pointer-events: none;
+}
+
+.game-semantic-action:focus-visible {
+  position: static;
+  width: auto;
+  height: auto;
+  min-height: 48px;
+  padding: 0.75rem 1rem;
+  margin: 0.5rem 0 0 0.5rem;
+  overflow: visible;
+  clip: auto;
+  white-space: normal;
+  border: 3px solid #243642;
+  border-radius: 0.6rem;
+  background: #fff7df;
+  color: #243642;
+  font:
+    700 1rem/1.2 Inter,
+    ui-rounded,
+    'Trebuchet MS',
+    system-ui,
+    sans-serif;
+  box-shadow: 0 4px 0 rgb(36 54 66 / 24%);
+  pointer-events: auto;
 }

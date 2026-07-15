@@ -75,6 +75,41 @@ export const repairRoutesAfterTileRemoval = async (
   return repaired;
 };
 
+export const repairRoutesAfterAuthorRemoval = async (
+  tenant: TenantIdentity,
+  authorId: string
+): Promise<number> => {
+  const routes = (await tenantStore.listRoutes()).filter(
+    (route) =>
+      route.recipe.tenantId === tenant.id && route.tiles.some((tile) => tile.authorId === authorId)
+  );
+  if (routes.length === 0) return 0;
+  const communityTiles = (await tenantStore.listTiles()).filter(
+    (tile) =>
+      tile.tenantId === tenant.id &&
+      tile.authorId !== authorId &&
+      (tile.status === 'certified' || tile.status === 'featured')
+  );
+  for (const route of routes) {
+    const rebuilt = generateRoute({
+      tenant,
+      dateKey: route.recipe.dateKey,
+      communityTiles,
+      length: route.recipe.tileIds.length,
+      biomeId: route.recipe.biomeId,
+      seedSalt: `privacy-removal:${route.recipe.revision + 1}`,
+    });
+    rebuilt.recipe = {
+      ...rebuilt.recipe,
+      id: route.recipe.id,
+      createdAt: route.recipe.createdAt,
+      revision: route.recipe.revision + 1,
+    };
+    await tenantStore.saveRoute(rebuilt);
+  }
+  return routes.length;
+};
+
 const biomeForDate = (dateKey: string): string => {
   const choices = ['meadow-postcard', 'harbor-parcel', 'autumn-rail', 'paper-city'];
   const day = Number(dateKey.replaceAll('-', ''));

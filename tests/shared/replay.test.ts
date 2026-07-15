@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { laneAtColumn, replayRun } from '../../src/shared/game/replay';
+import { appendReplaySafeLaneEvent, laneAtColumn, replayRun } from '../../src/shared/game/replay';
 import { createBlankLanes, setTileCell } from '../../src/shared/game/tile';
 import type { Cell, CourseTile } from '../../src/shared/game/types';
 
@@ -61,5 +61,22 @@ describe('run replay', () => {
     expect(result.ok).toBe(false);
     if (result.ok) return;
     expect(result.code).toBe('invalid-lane-transition');
+  });
+
+  it('serializes only adjacent lane changes at distinct route columns', () => {
+    const initial = [] as const;
+    const top = appendReplaySafeLaneEvent(initial, 1, 0);
+    const sameColumnSecondMove = appendReplaySafeLaneEvent(top, 1, 1);
+    const nonAdjacent = appendReplaySafeLaneEvent(top, 2, 2);
+    const backToMiddle = appendReplaySafeLaneEvent(top, 2, 1);
+
+    expect(top).toEqual([{ column: 1, lane: 0 }]);
+    expect(sameColumnSecondMove).toBe(top);
+    expect(nonAdjacent).toBe(top);
+    expect(backToMiddle).toEqual([
+      { column: 1, lane: 0 },
+      { column: 2, lane: 1 },
+    ]);
+    expect(replayRun(makeColumns(), backToMiddle).ok).toBe(true);
   });
 });

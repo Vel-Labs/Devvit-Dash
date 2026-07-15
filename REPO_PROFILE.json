@@ -4,12 +4,13 @@
     "name": "Daily Dash",
     "package": "daily-dash-devvit",
     "type": "devvit-web-phaser-game",
-    "status": "hackathon-prototype",
+    "status": "hackathon-candidate",
     "goal": "Community-authored fair course tiles compound into permanent playable delivery routes."
   },
   "truth": {
     "gameplay": "contracts/gameplay-rules.md",
     "storage": "contracts/redis-keyspace.md",
+    "lifecycle": "contracts/data-lifecycle.md",
     "tenancy": "contracts/tenancy-and-world-tour.md",
     "architecture": "docs/architecture/ARCHITECTURE.md",
     "roadmaps": "docs/roadmaps/README.md"
@@ -31,10 +32,10 @@
     "deploy": "npm run deploy"
   },
   "risks": [
-    "Devvit live playtest not yet verified in this generated package",
-    "ranked run outcomes need server-side input replay hardening",
+    "Installed candidate 0.0.1.43 passes the current phone QOL journey and full local gate; direct video capture remains local-practice client proof because the isolated webview has no Reddit parent bridge",
+    "public judge access, exact final-post/version alignment, fresh non-owner persistence, live moderator cleanup, and ranked completion behavior still need authenticated verification",
     "live speed/tween calibration still needs platform playtest telemetry",
     "World Tour requires external shared service and is disabled",
-    "third-party binary art is intentionally not bundled"
+    "only a small license-verified third-party art subset is bundled"
   ]
 }

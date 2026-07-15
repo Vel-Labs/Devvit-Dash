@@ -12,6 +12,15 @@ coverage/
 .nyc_output/
 test-results/
 playwright-report/
+.playwright-cli/
+
+# Local QA, video, and workflow evidence
+/output/
+/outputs/
+/_dashboard/
+/docs/goals/
+/design-qa.md
+/docs/audits/GITHUB_CLEANUP_CANDIDATES_*.md
 
 # Environment and secrets
 .env

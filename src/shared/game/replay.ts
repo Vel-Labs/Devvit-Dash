@@ -1,4 +1,4 @@
-import { LANE_COUNT } from './constants';
+import { LANE_CHANGE_COOLDOWN_COLUMNS, LANE_COUNT } from './constants';
 import type { Cell, Lane, LaneInputEvent } from './types';
 
 export type ReplaySuccess = {
@@ -38,6 +38,24 @@ export const laneAtColumn = (laneEvents: readonly LaneInputEvent[] = [], column:
     if (isLane(event.lane)) lane = event.lane;
   }
   return lane;
+};
+
+export const appendReplaySafeLaneEvent = (
+  laneEvents: readonly LaneInputEvent[],
+  column: number,
+  lane: Lane
+): readonly LaneInputEvent[] => {
+  const last = laneEvents.at(-1);
+  const previousLane = last?.lane ?? START_LANE;
+  if (
+    !Number.isInteger(column) ||
+    column < 0 ||
+    Math.abs(lane - previousLane) !== 1 ||
+    (last && column - last.column < LANE_CHANGE_COOLDOWN_COLUMNS)
+  ) {
+    return laneEvents;
+  }
+  return [...laneEvents, { column, lane }];
 };
 
 export const replayRun = (

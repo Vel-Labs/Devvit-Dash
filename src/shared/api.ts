@@ -25,6 +25,7 @@ export type BootstrapResponse = {
   username: string;
   authenticated: boolean;
   dailyRoute: RouteBundle;
+  todaySubmission: CourseTile | null;
   profile: PlayerProfile | null;
   achievements: AchievementDefinition[];
   worldTourEnabled: boolean;
@@ -45,6 +46,7 @@ export type SubmitTileRequest = {
 
 export type SubmitTileResponse = {
   status: 'ok';
+  disposition: 'created' | 'updated';
   tile: CourseTile;
   validation: TileValidationResult;
 };
@@ -77,14 +79,12 @@ export type CompleteRunResponse = {
 };
 
 export type CreatorOutcomeTile = {
-  tileId: string;
-  routeId: string;
   dateKey: string;
   routeRevision: number;
   tileIndex: number;
-  crossings: number;
-  cleanCrossings: number;
-  pathChoices: {
+  bestRunSampleSize: number;
+  cleanRouteBestRunSamples: number;
+  midpointLaneChoices: {
     top: number;
     middle: number;
     bottom: number;
@@ -94,8 +94,13 @@ export type CreatorOutcomeTile = {
 export type CreatorOutcomeResponse = {
   status: 'ok';
   profile: PlayerProfile;
-  featuredTiles: number;
-  totalCrossings: number;
+  creatorName: string;
+  communityName: string;
+  profileUrl?: string;
+  dailyRoute: RouteBundle;
+  featuredRouteAppearances: number;
+  lifetimeRecordedCrossings: number;
+  sampleScope: 'current-route-revision-best-runs-by-other-players';
   tiles: CreatorOutcomeTile[];
 };
 
@@ -126,6 +131,18 @@ export type RemoveTileResponse = {
 export type ProfileResponse = {
   status: 'ok';
   profile: PlayerProfile;
+};
+
+export type DeleteMyDataResponse = {
+  status: 'ok';
+  tilesDeleted: number;
+  routeRevisionsDeleted: number;
+  routesRepaired: number;
+  reportsAnonymized: number;
+  bestRunsDeleted: number;
+  runTokensDeleted: number;
+  submissionsDeleted: number;
+  profileDeleted: boolean;
 };
 
 export type LeaderboardResponse = {

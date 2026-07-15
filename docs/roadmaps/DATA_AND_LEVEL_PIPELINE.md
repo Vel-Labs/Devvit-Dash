@@ -16,11 +16,11 @@ Ordered tile IDs, fallback IDs, biome, seed, compiler version, revision, tenant,
 
 ### RouteBundle
 
-Recipe plus tile snapshots used by the client. Stored as JSON in the scaffold for simple retrieval. At scale, recipe and tiles can be read separately or compressed.
+Recipe plus tile snapshots used by the client. Each `routeId + revision` bundle is stored once as immutable JSON; a separate current-route pointer may advance after repair. At scale, recipe and tiles can be read separately or compressed.
 
 ### Run token/result
 
-A one-use server envelope binds user and route to a short validity window. Result stores score and run summary. A later replay event stream should become authoritative.
+A one-use server envelope binds user and immutable route revision to a short validity window. Completion requires the client to echo that revision, replays bounded lane events on the server, derives the result counters and score, and atomically claims the token only after validation.
 
 ### PlayerProfile
 
@@ -65,6 +65,8 @@ Algorithm:
 8. Save recipe and bundle; mark human tiles featured.
 9. Increment creator metrics exactly once per route revision policy.
 
+Saving inserts the revision snapshot with `HSETNX` before advancing the current-route record. A retry with identical bytes is safe; different bytes for the same revision are rejected as an integrity error.
+
 The seed is derived from tenant + date + compiler salt, so generation is reproducible.
 
 ## Cold start
@@ -82,10 +84,10 @@ When a tile is removed:
 3. Recompile affected routes without the tile.
 4. Preserve route ID and original creation date.
 5. Increment revision.
-6. Replace tile sequence/fallbacks.
+6. Insert a new immutable route snapshot and advance the current-route record.
 7. Keep leaderboards versioned by route revision so scores never mix across different geometry.
 
-The scaffold recompiles and increments revision, and ranked run storage is namespaced by revision.
+The scaffold recompiles and increments revision, preserves older snapshots for in-flight and historical authority, and namespaces ranked run storage by revision. For routes created before snapshot support, only the exact current revision can be backfilled. A token whose older geometry is no longer recoverable is safely invalidated.
 
 ## Redis layout
 
@@ -111,14 +113,15 @@ A tile is 54 cells plus metadata and should remain a few kilobytes in ordinary J
 
 ### Weekly maintenance
 
-The shipped endpoint is a bounded placeholder. Implement:
+The shipped endpoint now performs bounded lifecycle work:
 
-- expire submission hashes older than 35 days;
-- cap leaderboards to display/storage limit;
-- repair route references to removed tiles;
-- migrate old compiler versions in batches;
-- aggregate creator analytics;
-- save cursor and reschedule if work exceeds safe request budget.
+- give existing identities without activity timestamps a 30-day migration grace period;
+- anonymize at most ten inactive identities per run;
+- expire indexed submission hashes older than 35 days;
+- delete at most 100 actioned reports older than 180 days;
+- expire daily-post settings older than 90 days.
+
+Future scale work still needs leaderboard caps, compiler-version migrations, creator-analytics aggregation, and a durable cursor/reschedule strategy beyond the launch-sized bounded batches.
 
 ## API surface
 
@@ -138,6 +141,7 @@ The shipped endpoint is a bounded placeholder. Implement:
 | `GET /api/leaderboards/:routeId`        | top best runs                                             |
 | `GET /api/creator/outcome`              | authenticated creator crossing and path-choice postcard   |
 | `GET /api/profile`                      | authenticated profile                                     |
+| `DELETE /api/profile`                   | confirmed owner data/content deletion and route repair    |
 
 ## Integrity hardening backlog
 

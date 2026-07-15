@@ -2,6 +2,12 @@
 
 Current planning date: **June 25, 2026**. Submission target from the official rules: **July 15, 2026 at 6:00 pm PT**. Before any final submission claim, review [`../hackathon/RULES_COMPLIANCE.md`](../hackathon/RULES_COMPLIANCE.md) against the live rules and Devvit Rules.
 
+2026-07-13 refinement status: app-listing copy, Devpost narrative, judge access, screenshot plan, and 58-second demo script are staged under `docs/hackathon/`. Playtest `v0.0.1.13` closed the repeated-run lifecycle P1 and exercised the authenticated-owner mobile-emulation path. The candidate is ready for controlled QC; public/general judge access, fresh-member persistence, physical-device captures, live moderation, and final submission-version reconciliation remain explicit gates. These drafts are not proof of publication or submission.
+
+2026-07-15 packaging status: installed client `0.0.1.43` passed a fresh 390×844 QOL pass across Menu, Builder, Roadbook, Achievements, Runner, and Results. Fresh Builder, certification, Runner, and Roadbook footage now drives checksum-verified 58-second landscape and vertical screen-text cuts under `outputs/final-video-package-20260715/`, with a separate human-read script and the exact raw captures preserved for rebuilds after transient Playwright cleanup. The root README now leads with a judge itinerary, consumer journey, Reddit-native return loop, and dedicated Phaser 4.2 section. Paste-ready Developer Platform/Phaser feedback is staged for the optional Feedback Award survey. The direct capture is explicitly local-practice client proof; judge-accessible Reddit persistence and physical-device behavior remain outside that video claim.
+
+Dependency freeze: synchronized Devvit packages are pinned to 0.13.7, the six-day-old stable patch that added Vite 8 support and moved affected transitive security ranges past 0.13.6. Vite is pinned to 8.1.4, which produces a warning-free build with that plugin. The same-day 0.13.8 maintenance release and unrelated Phaser/Hono/tooling patches are intentionally deferred until after submission unless a candidate-blocking issue appears.
+
 ## June 25–27 — prove the artifact
 
 - Install dependencies and initialize Devvit app name.
