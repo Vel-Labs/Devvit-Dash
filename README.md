@@ -2,14 +2,17 @@
 
 **Build today. Ride forever.**
 
+**Legacy hackathon project.** Development is complete. This repository preserves the game and its hackathon build record. The game is hosted in the test community linked below.
+
 Daily Dash is a community-built delivery arcade inside Reddit. Every member can create a tiny piece of tomorrow's course. Daily Dash proves that contribution is fair, mixes accepted tiles into a finite Daily Route, and keeps completed routes in an evergreen Roadbook.
 
 The result is a simple promise: what the community builds today becomes something everyone can ride—and revisit—later.
 
 - **App listing:** [developers.reddit.com/apps/drawn-to-deliver](https://developers.reddit.com/apps/drawn-to-deliver)
+- **Test subreddit:** [r/drawn_to_deliver_dev](https://www.reddit.com/r/drawn_to_deliver_dev/)
 - **Demo post:** [Daily Dash — Build today. Ride forever.](https://www.reddit.com/r/drawn_to_deliver_dev/comments/1uvsr1g/daily_dash_20260714_build_today_ride_forever/) _(private test subreddit with Devvit Admin Helper access)_
 - **Source:** [github.com/Vel-Labs/Devvit-Dash](https://github.com/Vel-Labs/Devvit-Dash)
-- **Current installed candidate:** `0.0.1.43`
+- **Recorded hackathon build:** `0.0.1.43`
 
 ## Judge quick start
 
@@ -189,7 +192,7 @@ The first Devvit run may ask you to initialize or rename the globally unique app
 npm run check
 ```
 
-The complete gate validates repository shape, contracts, art provenance, shared/client/server behavior, strict TypeScript, lint, and formatting. The current candidate passes **24 test files / 100 tests**.
+The complete gate validates repository shape, contracts, art provenance, shared/client/server behavior, strict TypeScript, lint, and formatting. The hackathon validation record reports **24 test files / 100 tests**.
 
 Individual checks are also available:
 
@@ -218,7 +221,7 @@ Daily Dash was substantially expanded after June 17:
 
 ## Current proof boundary
 
-Installed candidate `0.0.1.43` passed the current 390 × 844 Menu, Builder, Roadbook, Achievements, Runner, and Results QOL journey plus the full local quality gate. The packaged demo videos use real `0.0.1.43` client interaction captured in explicit local-practice mode.
+During the hackathon, build `0.0.1.43` passed the 390 × 844 Menu, Builder, Roadbook, Achievements, Runner, and Results QOL journey plus the full local quality gate. The packaged demo videos use real `0.0.1.43` client interaction captured in explicit local-practice mode.
 
 The submitted judge path uses the exact Reddit post linked above. Its private test subreddit has Reddit's Devvit Admin Helper installed alongside candidate `0.0.1.43`, allowing Reddit administrators to enter the test community during judging. Local or private-playtest evidence is not presented as proof of general public access or completed Devpost submission.
 
